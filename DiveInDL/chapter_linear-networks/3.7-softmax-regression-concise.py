@@ -49,7 +49,7 @@ if __name__ == "__main__":
             loss = criterion(outputs, y)
             loss.backward()
             optimizer.step()
-            loss_sum += loss.item()
+            loss_sum += loss.item() # 这种做法并不是绝对准确，因为每个batch的样本数可能不同，但也够用
 
         print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss_sum / len(train_loader):.4f}')
 
