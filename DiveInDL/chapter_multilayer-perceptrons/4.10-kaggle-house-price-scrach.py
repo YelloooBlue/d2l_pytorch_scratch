@@ -55,7 +55,12 @@ num_outputs = 1  # 输出数（回归问题）
 # 不能直接定义，因为在k折交叉验证中需要多次创建模型
 def get_net():
     return torch.nn.Sequential(
-        torch.nn.Linear(num_inputs, num_outputs),
+        # torch.nn.Linear(num_inputs, num_outputs),
+        torch.nn.Linear(num_inputs, 64),  # 第一层，输入层到隐藏层
+        torch.nn.ReLU(),  # 激活函数
+        torch.nn.Linear(64, 64),  # 第二层，隐藏层到隐藏层
+        torch.nn.ReLU(),  # 激活函数
+        torch.nn.Linear(64, num_outputs)  # 输出层，隐藏层到输出层
     )
 
 def log_rmse(net, features, labels):
@@ -121,9 +126,9 @@ def k_fold_cross_validation(k, features, labels, num_epochs=100, lr=0.01, weight
 # ================ 运行k折交叉验证 ================
 k = 5  # 折数
 num_epochs = 100  # 训练轮数
-lr = 5  # 学习率
-weight_decay = 0  # 权重衰减
-batch_size = 64  # 批量大小
+lr = 0.01  # 学习率
+weight_decay = 100  # 权重衰减
+batch_size = 256  # 批量大小
 # train_rmse, test_rmse = k_fold_cross_validation(k, train_features, train_labels, num_epochs, lr, weight_decay, batch_size)
 
 record_loss_sum_train, record_loss_sum_test = [], []
@@ -153,3 +158,17 @@ for i in range(k):
 # ================ 计算平均RMSE ================
 print(f"Average Train RMSE: {np.mean(record_loss_sum_train):.4f}, Average Test RMSE: {np.mean(record_loss_sum_test):.4f}")
 
+# ================ 最终模型训练 ================
+final_net = get_net()  # 获取新的模型
+final_train_rmse, _ = train(final_net, train_features, train_labels, None, None, num_epochs, lr, weight_decay, batch_size)
+print(f"Final Train RMSE: {final_train_rmse[-1]:.4f}")
+
+# ================ 预测测试集 ================
+final_net.eval()  # 切换到评估模式
+with torch.no_grad():
+    test_preds = final_net(test_features)  # 预测测试集
+    test_preds = torch.clamp(test_preds, min=1.0, max=float('inf'))  # 限制预测值的范围
+    test_preds = test_preds.numpy()  # 转换为numpy数组
+# 保存预测结果
+submission = pandas.DataFrame({'Id': test_data['Id'], 'SalePrice': test_preds.flatten()})  # 转换为DataFrame
+submission.to_csv('../data/house-prices-advanced-regression-techniques/submission.csv', index=False)  # 保存到CSV文件
