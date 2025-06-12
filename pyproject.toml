@@ -8,5 +8,6 @@ dependencies = [
     "d2l>=1.0.3",
     "scikit-learn>=1.7.0",
     "torch>=2.7.0",
+    "torchinfo>=1.8.0",
     "torchvision>=0.22.0",
 ]
