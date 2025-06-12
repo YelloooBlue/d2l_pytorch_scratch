@@ -153,9 +153,9 @@ if __name__ == "__main__":
     print(f"Input shape: {X.shape}, Output shape: {Y.shape}")
 
     # 检查过渡层的输出
-    trans = Transition(3, 10)
-    Y = trans(X)
-    print(f"Input shape: {X.shape}, Output shape: {Y.shape}")
+    trans = Transition(23, 10)
+    Y1 = trans(Y)
+    print(f"Input shape: {Y.shape}, Output shape: {Y1.shape}")
 
     # 检查DenseNet网络结构
     summary(DenseNet(), input_size=(256, 1, 96, 96), device=device.type)
