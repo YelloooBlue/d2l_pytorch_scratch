@@ -109,24 +109,56 @@ if __name__ == "__main__":
     print(lines[10])
 
     # 将文本行拆分为单词或字符词元
+    print("# 按行拆分的词元预览 tokens:")
     tokens = tokenize(lines)
     for i in range(11):
         print(tokens[i])
 
     # 构建词表
+    print("# 词表预览 vocab:")
     vocab = Vocab(tokens)
     print(list(vocab.token_to_idx.items())[:10])
 
     # 测试词表
+    print(f'# 根据文本行tokens[0]和tokens[10]获取索引:')
     for i in [0, 10]:
         print('文本:', tokens[i])
         print('索引:', vocab[tokens[i]])
 
+    print('=' * 20)
+
     # ============= 正式读取数据 =============
 
-    corpus, vocab = load_corpus_time_machine()
-    print(f'# 词元总数: {len(corpus)}')
-    print('前20个词元索引:', corpus[:20])
-    print(f'# 词表大小: {len(vocab)}')
-    print('前20个词元:', vocab.to_tokens(corpus[:20]))
+    # corpus, vocab = load_corpus_time_machine()
+    # print(f'# 按char分词，corpus长度: {len(corpus)}')
+    # print(f'# 语料库 corpus 前10个预览: {corpus[:10]}')
+
+    # print(f'# 词表 vocab 大小: {len(vocab)}')
+    # print(f'# 词表 vocab 前10个预览: {vocab[:10]}')
+
+
+    # 拆分
+    lines = read_time_machine()
+    tokens = tokenize(lines, 'char') # 按字符拆分
+    print(f'# 按char分词，tokens长度: {len(tokens)}')
+    print(f'# tokens 前10行预览: {tokens[:10]}')
+
+    vocab = Vocab(tokens)
+    print(f'# 词表 vocab 大小: {len(vocab)}') # 这里只有28是因为，英文字符集只有26个字母，加上空格和<unk>
+    print(f'# 词表 vocab 前10个预览: {vocab.idx_to_token[:10]}')
+
+    # 因为时光机器数据集中的每个文本行不一定是一个句子或一个段落，
+    # 所以将所有文本行展平到一个列表中
+    corpus = [vocab[token] for line in tokens for token in line]
+    print(f'# 语料库 corpus 长度: {len(corpus)}')
+    print(f'# 语料库 corpus 前10个预览: {corpus[:10]}')
     
+
+    
+"""
+各个概念的例子
+    - token : 词元，文本中的基本单位，可以是单词、字符等，例如 "hello"、"world"、"h"、"e"、"l"、"l"、"o"
+    - tokens : 词元列表，在本例中是一个二维列表，每个子列表代表一行文本的词元，例如 [["h", "e", "l", "l", "o"], ["w", "o", "r", "l", "d"]]
+    - vocab : 词表，包含所有唯一的词元及其索引映射，例如 {"<unk>": 0, "h": 1, "e": 2, "l": 3, "o": 4, "w": 5, "r": 6, "d": 7}
+    - corpus : 语料库，包含所有词元的索引列表，例如 [1, 2, 3, 3, 4, 5, 6, 7]，其中每个数字对应于词表中的一个词元
+"""
