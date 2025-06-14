@@ -280,7 +280,9 @@ if __name__ == '__main__':
 
 
     # =========== 初始化数据集 ===========
-    train_iter, vocab = load_data_time_machine(batch_size, num_steps)
+    # train_iter, vocab = load_data_time_machine(batch_size, num_steps) # 训出来一般 loss=0.03，perplexity=1.03
+    train_iter, vocab = load_data_time_machine(batch_size, num_steps, use_random_iter=True) # 训出来一般 loss=0.5, perplexity=1.8
+
     vocab_size = len(vocab)
     print(f'词表大小: {vocab_size}')
     print(f'词表前10个词元: {vocab.idx_to_token[:10]}')  # 打印前10个词元
@@ -392,10 +394,10 @@ if __name__ == '__main__':
             print(f'困惑度: {perplexity:.4f}')
 
     # 绘制困惑度曲线
-    plt.plot(record_perplexity, label='困惑度')
+    plt.plot(record_perplexity, label='Perplexity')
     plt.xlabel('Epoch')
-    plt.ylabel('困惑度')
-    plt.title('困惑度曲线')
+    plt.ylabel('Perplexity')
+    plt.title('Training Perplexity')
     plt.legend()
     plt.show()
 
