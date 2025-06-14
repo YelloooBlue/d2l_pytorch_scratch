@@ -285,7 +285,7 @@ if __name__ == '__main__':
     print(f'词表大小: {vocab_size}')
     print(f'词表前10个词元: {vocab.idx_to_token[:10]}')  # 打印前10个词元
 
-    # =========== 测试 输入处理和模型前向传播 ===========
+    # =========== 测试独热编码 ===========
 
     # 测试变量
     X = torch.arange(10).reshape((2, 5)).to(device)  # (batch_size, num_steps)
@@ -294,9 +294,19 @@ if __name__ == '__main__':
     X_one_hot = F.one_hot(X.T, vocab_size)  # 首先从(batch_size, num_steps) 转置为 (num_steps, batch_size)，然后加入独热编码维度（vocab_size）
     print(f'X独热编码形状: {X_one_hot.shape}')  # (num_steps, batch_size, vocab_size)
 
+    # =========== 实例化模型 ===========
+    net = RNNModelScratch(vocab_size, num_hiddens, device)
+    """
+        在本例中所有代码共享一个RNN模型实例，
+        但这并不会互相影响。
+        RNN模型本身对batch_size和num_steps不敏感，只对数据的编码维度（vocab_size）和隐藏层维度（num_hiddens）敏感。
+        此外，模型的权重只会当执行反向传播时才会更新，所以在本例中，不必担心模型会因为多次调用而发生变化。
+    """
+
+    # =========== 模型测试 ===========
+
     # 初始化状态
     test_batch_size = X.shape[0]  # batch_size
-    net = RNNModelScratch(vocab_size, num_hiddens, device)
     state = torch.zeros((test_batch_size, num_hiddens), device=device)  # 初始化状态为零，形状为(batch_size, num_hiddens)
 
     # 模拟前向传播
@@ -308,29 +318,32 @@ if __name__ == '__main__':
     print(f'新状态形状: {state_new.shape}')  # 新状态的形状是 (batch_size, num_hiddens)
     print(" ===== 模拟前向传播结束 ===== ")
 
-    # ========== 测试模型预测 ===========
-    state = torch.zeros((1, num_hiddens), device=device)  # 初始化状态，batch_size为1
+    # ========== 测试模型预测（在没有学习之前进行预测） ===========
 
-    prefix = 'time traveller '
-    num_predict = 10
-    outputs = [vocab[prefix[0]]]  # 将第一个字符的索引添加到输出列表中，最开始为 [3]，即't' 的索引
+    with torch.no_grad(): # 虽然不会影响梯度计算，但可以减少内存使用
+
+        state = torch.zeros((1, num_hiddens), device=device)  # 初始化状态，batch_size为1
+
+        prefix = 'time traveller '
+        num_predict = 10
+        outputs = [vocab[prefix[0]]]  # 将第一个字符的索引添加到输出列表中，最开始为 [3]，即't' 的索引
     
-    # 预热
-    for y in prefix[1:]:
-        X = torch.tensor([[outputs[-1]]], device=device)
-        _, state = net(X, state) 
+        # 预热
+        for y in prefix[1:]:
+            X = torch.tensor([[outputs[-1]]], device=device)
+            _, state = net(X, state) 
 
-        # 只更新state，outputs仍用观测值
-        outputs.append(vocab[y])
+            # 只更新state，outputs仍用观测值
+            outputs.append(vocab[y])
 
-    print(f'预热后的输出索引: {outputs}')  # 打印预热后的输出索引
-    print(f'预热后的输出字符: {vocab.to_tokens(outputs)}')  # 打印预热后的输出字符
+        print(f'预热后的输出索引: {outputs}')  # 打印预热后的输出索引
+        print(f'预热后的输出字符: {vocab.to_tokens(outputs)}')  # 打印预热后的输出字符
 
-    # 预测
-    for _ in range(num_predict):
-        X = torch.tensor([[outputs[-1]]], device=device)  # 使用最后一个输出作为下一个输入
-        Y, state = net(X, state)  # 前向传播
-        outputs.append(Y.argmax(dim=1).item())
+        # 预测
+        for _ in range(num_predict):
+            X = torch.tensor([[outputs[-1]]], device=device)  # 使用最后一个输出作为下一个输入
+            Y, state = net(X, state)  # 前向传播
+            outputs.append(Y.argmax(dim=1).item())
 
     print(''.join(vocab.to_tokens(outputs)))  # 将索引转换为字符并打印
         
@@ -386,23 +399,25 @@ if __name__ == '__main__':
     plt.show()
 
     print("模型训练完成！")
-    
+
     # 测试模型预测
-    state = torch.zeros((1, num_hiddens), device=device)  # 初始化状态，batch_size为1
-    prefix = 'time traveller '
-    outputs = [vocab[prefix[0]]]  # 将第一个字符的索引添加到输出列表中
-    num_predict = 50
-    # 预热
-    for y in prefix[1:]:
-        X = torch.tensor([[outputs[-1]]], device=device)
-        _, state = net(X, state)  # 前向传播
-        outputs.append(vocab[y])  # 只更新outputs
-    # 预测
-    for _ in range(num_predict):
-        X = torch.tensor([[outputs[-1]]], device=device)  # 使用最后一个输出作为下一个输入
-        Y, state = net(X, state)  # 前向传播
-        outputs.append(Y.argmax(dim=1).item())  # 取最大值的索引
-    print(''.join(vocab.to_tokens(outputs)))  # 将索引转换为字符并打印
+    with torch.no_grad():
+
+        state = torch.zeros((1, num_hiddens), device=device)  # 初始化状态，batch_size为1
+        prefix = 'time traveller '
+        outputs = [vocab[prefix[0]]]  # 将第一个字符的索引添加到输出列表中
+        num_predict = 50
+        # 预热
+        for y in prefix[1:]:
+            X = torch.tensor([[outputs[-1]]], device=device)
+            _, state = net(X, state)  # 前向传播
+            outputs.append(vocab[y])  # 只更新outputs
+        # 预测
+        for _ in range(num_predict):
+            X = torch.tensor([[outputs[-1]]], device=device)  # 使用最后一个输出作为下一个输入
+            Y, state = net(X, state)  # 前向传播
+            outputs.append(Y.argmax(dim=1).item())  # 取最大值的索引
+        print(''.join(vocab.to_tokens(outputs)))  # 将索引转换为字符并打印
     
             
 
