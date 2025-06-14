@@ -352,12 +352,12 @@ if __name__ == '__main__':
     optimizer = torch.optim.SGD(net.params, lr=lr)  # 定义优化器
     print("开始训练模型...")
 
+    record_perplexity = []  # 用于记录每个epoch的困惑度
+
     for epoch in range(num_epochs):
         
         state = None
         l_sum, n = 0.0, 0
-
-        record_preplexity = []  # 用于记录每个epoch的困惑度
 
         for X, Y in train_iter:
             # 将输入和标签移动到设备上
@@ -383,15 +383,16 @@ if __name__ == '__main__':
             # 记录损失和困惑度
             l_sum += l.item() * y.numel()
             n += y.numel()
-            preplexity = math.exp(l_sum / n)
-            record_preplexity.append(preplexity)
+        
+        perplexity = math.exp(l_sum / n)  # 计算困惑度
+        record_perplexity.append(perplexity)
 
         if (epoch + 1) % 10 == 0:
             print(f'epoch {epoch + 1}, loss {l_sum / n:.4f}')
-            print(f'困惑度: {math.exp(l_sum / n):.4f}')
+            print(f'困惑度: {perplexity:.4f}')
 
     # 绘制困惑度曲线
-    plt.plot(record_preplexity, label='困惑度')
+    plt.plot(record_perplexity, label='困惑度')
     plt.xlabel('Epoch')
     plt.ylabel('困惑度')
     plt.title('困惑度曲线')
