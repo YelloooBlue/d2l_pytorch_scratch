@@ -173,7 +173,11 @@ class Seq2SeqDecoder(nn.Module):
 
     def init_state(self, enc_outputs, *args):
         # enc_outputs 为 (output, state)
-        return enc_outputs[1] # 以Encoder的最后一个状态作为Decoder的初始状态
+        _, enc_state = enc_outputs # 编码器的输出和最后一个状态
+        # enc_state的形状为(num_layers,batch_size,num_hiddens)
+        context = enc_state[-1]  # 编码器的最后一个状态，形状为(batch_size,num_hiddens)
+
+        return (enc_state, context)
 
     def forward(self, X, state):
         # 此时X的形状为(batch_size,num_steps)
@@ -184,8 +188,10 @@ class Seq2SeqDecoder(nn.Module):
         
         # 广播context，使其与X的形状匹配
         
-        # 此时state的形状为(num_layers,batch_size,num_hiddens)
-        c = state[-1] # 编码器的最后一个状态，形状为(batch_size,num_hiddens)
+        # 此时state内包含上次Decoder的状态和编码器的最后一个状态
+        h, c = state
+        # h的形状为(num_layers,batch_size,num_hiddens),是从上一次Decoder的输出传递过来的
+        # context的形状为(batch_size,num_hiddens)，是编码器的最后一个状态
 
         # 此时 X 的形状为(num_steps,batch_size,embed_size)
         T = X.shape[0] # 序列的长度
@@ -194,12 +200,12 @@ class Seq2SeqDecoder(nn.Module):
         
         # 拼接当前 词元的嵌入向量 和 编码器的最后一个状态
         X_and_context = torch.cat((X, context), 2)
-        output, state = self.rnn(X_and_context, state)
+        output, h = self.rnn(X_and_context, h)
         output = self.dense(output).permute(1, 0, 2)
         # output的形状:(batch_size,num_steps,vocab_size)
         # state的形状:(num_layers,batch_size,num_hiddens)
-        return output, state
 
+        return output, (h, c) # 修改为将编码器的最后一个状态和Decoder的状态一起返回
 class EncoderDecoder(nn.Module):
     """编码器-解码器架构的基类"""
     def __init__(self, encoder, decoder, **kwargs):
@@ -328,7 +334,8 @@ if __name__ == "__main__":
     state = decoder.init_state(encoder(X))
     output, state = decoder(X, state)
     print('output的形状:', output.shape) # (batch_size, num_steps, vocab_size)
-    print('state的形状:', state.shape)   # (num_layers, batch_size
+    # print('state的形状:', state.shape)   # (num_layers, batch_size
+    print('state的形状:', state[0].shape)   # (num_layers, batch_size, num_hiddens)
 
     # 测试sequence_mask
     X = torch.tensor([[1, 2, 3], [4, 5, 6]])
@@ -473,6 +480,11 @@ if __name__ == "__main__":
 
             # 与encoder最大的区别是，解码器的输入是前一个时间步的输出dec_X和隐藏状态dec_state
             Y_hat, dec_state = net.decoder(dec_X, dec_state)
+            """
+                注意在这里，有两种方法
+                1. Sutskever等人提出的seq2seq模型中，解码器的输入是前一个时间步的输出，和「前一步的隐藏状态」。
+                2. Cho等人提出，解码器的输入是前一个时间步的输出和「encoder的最后一个状态」。
+            """
             dec_X = Y_hat.argmax(dim=2)  # 取最大概率的词元
             predicted_token = dec_X.squeeze(0).type(torch.int32).item()  # 取出预测的词元
 
