@@ -292,7 +292,7 @@ class Seq2SeqAttentionDecoder(AttentionDecoder):
                  dropout=0, **kwargs):
         super(Seq2SeqAttentionDecoder, self).__init__(**kwargs)
         self.attention = AdditiveAttention(
-            num_hiddens, num_hiddens, num_hiddens, dropout)
+            num_hiddens, num_hiddens, num_hiddens, dropout) # key_size和query_size都为num_hiddens
         self.embedding = nn.Embedding(vocab_size, embed_size)
         self.rnn = nn.GRU(
             embed_size + num_hiddens, num_hiddens, num_layers,
@@ -300,36 +300,61 @@ class Seq2SeqAttentionDecoder(AttentionDecoder):
         self.dense = nn.Linear(num_hiddens, vocab_size)
 
     def init_state(self, enc_outputs, enc_valid_lens, *args):
-        # outputs的形状为(batch_size，num_steps，num_hiddens).
-        # hidden_state的形状为(num_layers，batch_size，num_hiddens)
         outputs, hidden_state = enc_outputs
+        # 此时outputs的形状为(num_steps, batch_size, num_hiddens)
+        # 此时hidden_state的形状为(num_layers, batch_size, num_hiddens)
         return (outputs.permute(1, 0, 2), hidden_state, enc_valid_lens)
+        # outputs的形状转换为(batch_size, num_steps, num_hiddens)
 
     def forward(self, X, state):
-        # enc_outputs的形状为(batch_size,num_steps,num_hiddens).
-        # hidden_state的形状为(num_layers,batch_size,
-        # num_hiddens)
+        # X: (batch_size,num_steps)
         enc_outputs, hidden_state, enc_valid_lens = state
-        # 输出X的形状为(num_steps,batch_size,embed_size)
+        # enc_outputs的形状为(batch_size,num_steps,num_hiddens).
+        # hidden_state的形状为(num_layers,batch_size,num_hiddens)
+        
         X = self.embedding(X).permute(1, 0, 2)
+        # X_embedding的形状为(batch_size,num_steps,embed_size)
+        # X的形状转换为(num_steps,batch_size,embed_size)
+
+        # 遍历每个时间步
         outputs, self._attention_weights = [], []
         for x in X:
-            # query的形状为(batch_size,1,num_hiddens)
+            # x的形状为(batch_size,embed_size)
+            
             query = torch.unsqueeze(hidden_state[-1], dim=1)
-            # context的形状为(batch_size,1,num_hiddens)
-            context = self.attention(
-                query, enc_outputs, enc_outputs, enc_valid_lens)
+            # query的形状为(batch_size,1,num_hiddens) 查询个数为1
+
+            context = self.attention(query, enc_outputs, enc_outputs, enc_valid_lens) # keys和values都为enc_outputs
+            # context的形状为(batch_size,1,num_hiddens) = (batch_size, 查询的个数, dim_value)
+
+            
             # 在特征维度上连结
             x = torch.cat((context, torch.unsqueeze(x, dim=1)), dim=-1)
+            # x先变形为(batch_size,1,embed_size)
+            # 然后在特征维度上连结，得到(batch_size,1,embed_size+num_hiddens)
+            
+            
+            x = x.permute(1, 0, 2)
             # 将x变形为(1,batch_size,embed_size+num_hiddens)
-            out, hidden_state = self.rnn(x.permute(1, 0, 2), hidden_state)
+            out, hidden_state = self.rnn(x, hidden_state)
+            # out的形状为(1,batch_size,num_hiddens)
+
             outputs.append(out)
             self._attention_weights.append(self.attention.attention_weights)
+        
+        
+        # 此时outputs是一个列表，包含了每个时间步的输出
+        # outputs的形状为(num_steps,batch_size,num_hiddens)
+        # self._attention_weights是一个列表，包含了每个时间步的注意力权重
+
+        outputs = self.dense(torch.cat(outputs, dim=0))
         # 全连接层变换后，outputs的形状为
         # (num_steps,batch_size,vocab_size)
-        outputs = self.dense(torch.cat(outputs, dim=0))
+
         return outputs.permute(1, 0, 2), [enc_outputs, hidden_state,
                                           enc_valid_lens]
+        # 返回的outputs的形状为(batch_size,num_steps,vocab_size)
+                                        
 
     @property
     def attention_weights(self):
@@ -425,15 +450,27 @@ if __name__ == '__main__':
     decoder.eval()
 
     # 测试编码器和解码器
+    print("================= Encoder Test =================")
     X = torch.zeros((4, 7), dtype=torch.long)  # (batch_size,num_steps)
-    state = decoder.init_state(encoder(X), None)
-    output, state = decoder(X, state)
-    
-    print(f'output shape: {output.shape}')
-    print(f'state shape: {len(state)}')
-    print(f'state[0] shape: {state[0].shape}')
-    print(f'state[1] len: {len(state[1])}')
-    print(f'state[1][0] shape: {state[1][0].shape}')
+    enc_outputs = encoder(X)
+    print(f'X shape: {X.shape}')
+    print(f'enc_outputs.outputs shape: {enc_outputs[0].shape}') # (num_steps, batch_size, num_hiddens) = (7, 4, 16)
+    print(f'enc_outputs.state shape: {enc_outputs[1].shape}')   # (num_layers, batch_size, num_hiddens) = (2, 4, 16)
+
+    print("================= Decoder Test =================")
+    state = decoder.init_state(enc_outputs, None)                       # [转置的enc_outputs, hidden_state, enc_valid_lens]
+    print(f'init_state len: {len(state)}')
+    print(f'init_state[0](转置的enc_outputs) shape: {state[0].shape}')   # (batch_size, num_steps, num_hiddens) = (4, 7, 16)
+    print(f'init_state[1](hidden_state) shape: {state[1].shape}')       # (num_layers, batch_size, num_hiddens) = (2, 4, 16)
+
+
+    dec_output, state = decoder(X, state)
+    print(f'dec_output shape: {dec_output.shape}')              # (batch_size, num_steps, vocab_size) = (4, 7, 10)
+    print(f'state[0](enc_outputs) shape: {state[0].shape}')  # (batch_size, num_steps, num_hiddens) = (4, 7, 16)
+    print(f'state[1](hidden_state) shape: {state[1].shape}')  # (num_layers, batch_size, num_hiddens) = (2, 4, 16)
+
+
+    # exit()
 
 
     #  ==================================== 模型训练 ====================================
