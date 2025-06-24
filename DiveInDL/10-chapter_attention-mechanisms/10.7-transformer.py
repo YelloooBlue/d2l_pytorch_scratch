@@ -305,6 +305,8 @@ class AddNorm(nn.Module):
     def forward(self, X, Y):
         return self.ln(self.dropout(Y) + X)
 
+# ============= Encoder =============
+
 # 来自10.7
 class EncoderBlock(nn.Module):
     """Transformer编码器块"""
@@ -321,7 +323,7 @@ class EncoderBlock(nn.Module):
         self.addnorm2 = AddNorm(norm_shape, dropout)
 
     def forward(self, X, valid_lens):
-        Y = self.addnorm1(X, self.attention(X, X, X, valid_lens))
+        Y = self.addnorm1(X, self.attention(X, X, X, valid_lens)) # Y的形状:(batch_size,num_steps,num_hiddens)
         return self.addnorm2(Y, self.ffn(Y))
 
 # 来自9.6
@@ -355,12 +357,15 @@ class TransformerEncoder(Encoder):
         # 因此嵌入值乘以嵌入维度的平方根进行缩放，
         # 然后再与位置编码相加。
         X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+        # X = self.pos_encoding(self.embedding(X)) # 我感觉用这个更合理，因为这里embedding是用N(0,1)初始化的, 而不是Xavier
         self.attention_weights = [None] * len(self.blks)
         for i, blk in enumerate(self.blks):
             X = blk(X, valid_lens)
             self.attention_weights[
                 i] = blk.attention.attention.attention_weights
         return X
+
+# ============= Decoder =============
 
 # 来自10.7
 class DecoderBlock(nn.Module):
@@ -409,22 +414,6 @@ class DecoderBlock(nn.Module):
         Z = self.addnorm2(Y, Y2)
         return self.addnorm3(Z, self.ffn(Z)), state
 
-# # 这里我们不用9.6的Decoder，而是用nn.Module自己实现
-# class AttentionDecoder(nn.Module):
-#     """带有注意力机制解码器的基本接口"""
-#     def __init__(self, **kwargs):
-#         super(AttentionDecoder, self).__init__(**kwargs)
-
-#     def init_state(self, enc_outputs, *args):
-#         raise NotImplementedError
-
-#     def forward(self, X, state):
-#         raise NotImplementedError
-
-#     @property
-#     def attention_weights(self):
-#         raise NotImplementedError
-
 # 来自9.6
 class Decoder(nn.Module):
     """编码器-解码器架构的基本解码器接口"""
@@ -470,6 +459,7 @@ class TransformerDecoder(AttentionDecoder):
 
     def forward(self, X, state):
         X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+        # X = self.pos_encoding(self.embedding(X)) # 我感觉用这个更合理，因为这里embedding是用N(0,1)初始化的, 而不是Xavier
         self._attention_weights = [[None] * len(self.blks) for _ in range (2)]
         for i, blk in enumerate(self.blks):
             X, state = blk(X, state)
@@ -568,31 +558,36 @@ if __name__ == "__main__":
     print('layer norm:', ln(X), '\nbatch norm:', bn(X))
 
     # 测试AddNorm
-    add_norm = AddNorm([3, 4], 0.5)
+    add_norm = AddNorm([3, 4], 0.5) # 归一化形状为(3, 4)，即只对后两个维度，dropout率为0.5
     add_norm.eval()
-    print(add_norm(torch.ones((2, 3, 4)), torch.ones((2, 3, 4))).shape)
+    X = torch.ones((2, 3, 4))
+    Y = torch.ones((2, 3, 4))
+    print(f'add norm:\n{add_norm(X, Y).shape}\n')
 
     # 测试EncoderBlock
-    X = torch.ones((2, 100, 24))
+    X = torch.ones((2, 100, 24)) # (batch_size, num_steps, num_hiddens)
     valid_lens = torch.tensor([3, 2])
-    encoder_blk = EncoderBlock(24, 24, 24, 24, [100, 24], 24, 48, 8, 0.5)
+    encoder_blk = EncoderBlock(24, 24, 24, 24, [100, 24], 24, 48, 8, 0.5) 
+    # key_size = query_size = value_size = num_hiddens = 24，norm_shape, ffn_num_input, ffn_num_hiddens, num_heads, dropout
     encoder_blk.eval()
-    print(encoder_blk(X, valid_lens).shape)
+    print(f'encoder block:\n{encoder_blk(X, valid_lens).shape}\n')
 
     # 测试TransformerEncoder
-    encoder = TransformerEncoder(
-    200, 24, 24, 24, 24, [100, 24], 24, 48, 8, 2, 0.5)
+    encoder = TransformerEncoder(200, 24, 24, 24, 24, [100, 24], 24, 48, 8, 2, 0.5)
+    # vocab_size = 200，key_size = query_size = value_size = num_hiddens = 24，norm_shape, ffn_num_input, ffn_num_hiddens, num_heads, dropout
     encoder.eval()
-    X = torch.ones((2, 100), dtype=torch.long)
-    print(encoder(X, valid_lens).shape)
+    X = torch.ones((2, 100), dtype=torch.long) # Embedding前的X
+    print(f'transformer encoder:\n{encoder(X, valid_lens).shape}\n')
 
     # 测试DecoderBlock
     decoder_blk = DecoderBlock(24, 24, 24, 24, [100, 24], 24, 48, 8, 0.5, 0)
     decoder_blk.eval()
     X = torch.ones((2, 100, 24))
     state = [encoder_blk(X, valid_lens), valid_lens, [None]]
-    print(decoder_blk(X, state)[0].shape)
-    
+    print(f'decoder block:\n{decoder_blk(X, state)[0].shape}\n')
+
+    # exit()
+
     # ============================== 训练与预测 ==============================
 
     # 检查CUDA和Metal是否可用
@@ -613,8 +608,8 @@ if __name__ == "__main__":
     num_hiddens, num_layers, dropout, batch_size, num_steps = 32, 2, 0.1, 64, 10
     lr, num_epochs = 0.005, 200
     ffn_num_input, ffn_num_hiddens, num_heads = 32, 64, 4
-    key_size, query_size, value_size = 32, 32, 32
-    norm_shape = [32]
+    key_size, query_size, value_size = 32, 32, 32           # Q, K, V的维度
+    norm_shape = [32]                                       # 表示只对最后一个维度进行归一化
 
     # 加载数据
     train_iter, src_vocab, tgt_vocab = load_data_nmt(batch_size, num_steps)
@@ -631,7 +626,7 @@ if __name__ == "__main__":
     net = EncoderDecoder(encoder, decoder)
 
     # 检查是否有训练好的模型，如果有则不需要重新训练
-    train_from_scratch = False
+    train_from_scratch = True
     try:
         net.load_state_dict(torch.load('../models/10.7-transformer.pth'))
         print("Loaded pre-trained model.")
