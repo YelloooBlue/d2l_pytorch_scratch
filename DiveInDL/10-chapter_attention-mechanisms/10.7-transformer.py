@@ -386,16 +386,46 @@ class DecoderBlock(nn.Module):
         self.addnorm3 = AddNorm(norm_shape, dropout)
 
     def forward(self, X, state):
+        # state的形状为[enc_outputs, enc_valid_lens, [None]*num_layers]
+
+        """
+            X的形状为(batch_size,num_steps,num_hiddens)   
+            - 训练阶段：（batch_size, target_num_steps,num_hiddens）
+            - 预测阶段：（batch_size, 1, num_hiddens）
+        """
         enc_outputs, enc_valid_lens = state[0], state[1]
+        # enc_outputs的形状:(batch_size,num_steps,num_hiddens)
+
         # 训练阶段，输出序列的所有词元都在同一时间处理，
         # 因此state[2][self.i]初始化为None。
         # 预测阶段，输出序列是通过词元一个接着一个解码的，
         # 因此state[2][self.i]包含着直到当前时间步第i个块解码的输出表示
+
+        # 已生成的词元的历史键值对（仅在「预测」阶段使用）
+        """
+            state[2][self.i] 存储第 i 个解码器层的历史键值对
+            - 训练阶段：因为能看见所有的词元，所以forward只会被调用一次，缓存没有意义
+            - 预测阶段：因为每次只会解码一个词元，所以forward会被调用多次，
+              每次调用时，X的形状为(batch_size,1,num_hiddens)，
+              随后以X作为Q，state[2][self.i]作为K和V，即查询当前词元和过去的所有词元，
+        """
+        
         if state[2][self.i] is None:
-            key_values = X
+            key_values = X  # 初始时，key_values等于X
         else:
             key_values = torch.cat((state[2][self.i], X), axis=1)
         state[2][self.i] = key_values
+        
+        # 生成mask (仅在「训练」阶段使用)
+        """
+            在训练阶段，dec_valid_lens的形状为(batch_size,num_steps)，
+            形如
+            [[1, 2, ..., num_steps],
+             [1, 2, ..., num_steps],
+             ...]
+            其中每一行是[1,2,...,num_steps]，表示解码器的每个时间步都可以看到之前的所有词元。
+            在预测阶段，dec_valid_lens为None，因为后面没有词元需要掩蔽。
+        """
         if self.training:
             batch_size, num_steps, _ = X.shape
             # dec_valid_lens的开头:(batch_size,num_steps),
@@ -406,11 +436,16 @@ class DecoderBlock(nn.Module):
             dec_valid_lens = None
 
         # 自注意力
-        X2 = self.attention1(X, key_values, key_values, dec_valid_lens)
+        X2 = self.attention1(X, key_values, key_values, dec_valid_lens)     # 掩蔽多头注意力
         Y = self.addnorm1(X, X2)
         # 编码器－解码器注意力。
-        # enc_outputs的开头:(batch_size,num_steps,num_hiddens)
-        Y2 = self.attention2(Y, enc_outputs, enc_outputs, enc_valid_lens)
+        """
+            对于一个样本来说，enc_outputs的内容始终是一样的，有点像之前RNN的context，
+            它的形状是(batch_size,num_steps,num_hiddens)，
+            它的含义是原始输入序列，在num_hiddens维度上经过嵌入和位置编码后的表示。
+            
+        """
+        Y2 = self.attention2(Y, enc_outputs, enc_outputs, enc_valid_lens)   # “编码器－解码器”多头注意力
         Z = self.addnorm2(Y, Y2)
         return self.addnorm3(Z, self.ffn(Z)), state
 
@@ -484,8 +519,8 @@ class EncoderDecoder(nn.Module):
         self.decoder = decoder
 
     def forward(self, enc_X, dec_X, *args):
-        enc_outputs = self.encoder(enc_X, *args)
-        dec_state = self.decoder.init_state(enc_outputs, *args)
+        enc_outputs = self.encoder(enc_X, *args)                # 形状为(batch_size,num_steps,num_hiddens)
+        dec_state = self.decoder.init_state(enc_outputs, *args) # dec_state的形状为[enc_outputs, enc_valid_lens, [None]*num_layers]
         return self.decoder(dec_X, dec_state)
 
 # ==================================== 模型训练和评估 ====================================
