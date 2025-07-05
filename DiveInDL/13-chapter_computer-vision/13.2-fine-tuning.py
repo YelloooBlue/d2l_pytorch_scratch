@@ -149,6 +149,17 @@ if __name__ == "__main__":
         torchvision.transforms.ToTensor(),
         normalize])
     
+
+
+    """
+        我们在这里做四个实验：
+        1. 微调预训练模型，使用10倍的学习率来训练最后
+        2. 从头开始训练模型
+        3. 冻结预训练模型的卷积层，只训练最后一层
+        4. 使用预训练模型的“Hotdog”类的fc层权重
+    """
+
+    
     # =========================== 定义模型 ===========================
     
     # 导入预训练模型
@@ -165,6 +176,10 @@ if __name__ == "__main__":
     # =========================== 训练微调模型 ===========================
     
     train_fine_tuning(finetune_net, 5e-5)
+    """
+        1. 微调预训练模型，使用10倍的学习率来训练最后一层
+        loss: 0.22   train acc: 0.92   test acc: 0.93
+    """
 
     # ============================ 从头开始训练 ===========================
 
@@ -172,3 +187,46 @@ if __name__ == "__main__":
     scratch_net.fc = nn.Linear(scratch_net.fc.in_features, 2)  # 修改最后一层为2个输出
     nn.init.xavier_uniform_(scratch_net.fc.weight)
     train_fine_tuning(scratch_net, 5e-4, param_group=False)
+
+    """
+        2. 从头开始训练模型
+        loss: 0.37   train acc: 0.83   test acc: 0.86
+    """
+
+    # ============================ 冻结卷积层 ===========================
+
+    frozen_net = torchvision.models.resnet18(pretrained=False)
+    frozen_net.load_state_dict(torch.load("../checkpoints/resnet18-f37072fd.pth"))
+    for param in frozen_net.parameters():
+        param.requires_grad = False
+    frozen_net.fc = nn.Linear(frozen_net.fc.in_features, 2)  # 修改最后一层为2个输出
+    nn.init.xavier_uniform_(frozen_net.fc.weight)
+    train_fine_tuning(frozen_net, 5e-5, param_group=False)
+
+    """
+        3. 冻结预训练模型的卷积层，只训练最后一层
+        loss: 0.38   train acc: 0.82   test acc: 0.85
+    """
+
+    # ============================ 使用预训练模型Hotdog类 ============================
+    weight = pretrained_net.fc.weight # 1000 x 512
+    print(f"Pretrained model fc weight shape: {weight.shape}")
+    hotdog_w = torch.split(weight.data, 1, dim=0)[934] # 1 x 512
+    print(f"Hotdog class weight shape: {hotdog_w.shape}")
+
+    # 使用预训练模型的“Hotdog”类的fc层
+    hotdog_net = torchvision.models.resnet18(pretrained=False)
+    hotdog_net.load_state_dict(torch.load("../checkpoints/resnet18-f37072fd.pth"))
+    hotdog_net.fc = nn.Linear(hotdog_net.fc.in_features, 2)  # 修改最后一层为2个输出，形状应该是 2 x 512
+    new_fc_weight = torch.zeros((2, hotdog_net.fc.in_features))  # 2 x 512
+    new_fc_weight[0] = hotdog_w  # 将Hotdog类的权重赋值
+    new_fc_weight[1] = torch.zeros(hotdog_net.fc.in_features)  # 将非Hotdog类的权重初始化为0
+    hotdog_net.fc.weight.data = new_fc_weight  # 将新的权重赋值给fc层
+    hotdog_net.fc.bias.data = torch.tensor([0.0, 0.0])  # 偏置初始化为0
+    print(f"Hotdog net fc weight shape: {hotdog_net.fc.weight.shape}")
+
+    train_fine_tuning(hotdog_net, 5e-5, param_group=False)
+    """
+        4. 使用预训练模型的“Hotdog”类的fc层权重
+        loss: 0.17   train acc: 0.93   test acc: 0.93
+    """
