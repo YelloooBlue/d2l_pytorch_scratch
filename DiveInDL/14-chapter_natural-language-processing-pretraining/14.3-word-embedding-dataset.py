@@ -198,8 +198,8 @@ def batchify(data):
         # 标签，1表示上下文词，0表示负采样噪声词
         labels += [[1] * len(context) + [0] * (max_len - len(context))]
     
-    return (np.array(centers).reshape((-1, 1)), np.array(
-        contexts_negatives), np.array(masks), np.array(labels))
+    return (torch.tensor(centers).reshape((-1, 1)), torch.tensor(
+        contexts_negatives), torch.tensor(masks), torch.tensor(labels))
 
 # ============================ 封装数据集 ===========================
 
