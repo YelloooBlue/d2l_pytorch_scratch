@@ -247,6 +247,20 @@ def skip_gram(center, contexts_and_negatives, embed_v, embed_u):
     pred = torch.bmm(v, u.permute(0, 2, 1))
     return pred
 
+    """
+        embed_v 的更新：
+            每次更新时，embed_v(center)会向所有正样本上下文词的平均向量靠近，同时远离负样本向量。
+            这使得 embed_v 捕捉到词的通用上下文分布（即语义）。
+            「学习如何通过自身语义来预测上下文词」。
+        embed_u 的更新：
+            每个上下文词向量uo会根据不同的中心词wc被更新。
+            例如，
+            当中心词是 “king” 时，embed_u(“crown”)会靠近embed_v(“king”)；
+            当中心词是 “prince” 时，embed_u(“crown”)会靠近embed_v(“prince”)。
+            这使得 embed_u 捕捉到词的上下文依赖角色。
+            「学习如何让自己与不同中心词的语义相匹配」。
+    """
+
 # ============================= 辅助函数 ===========================
 
 class SigmoidBCELoss(nn.Module):
@@ -311,6 +325,11 @@ if __name__ == "__main__":
                                     embedding_dim=embed_size),
                         nn.Embedding(num_embeddings=len(vocab),
                                     embedding_dim=embed_size))
+    
+    """
+        net[0]是中心词的嵌入层，net[1]是上下文词和负采样噪声词的嵌入层。
+        这两个嵌入层并没有直接连接在一起，而是通过skip_gram函数进行前向传播。
+    """
     
     # ============================= 训练模型 ===========================
 
