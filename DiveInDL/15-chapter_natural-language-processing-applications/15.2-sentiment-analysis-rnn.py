@@ -161,30 +161,36 @@ class TokenEmbedding:
 # =========================== 网络定义 ===========================
 
 class BiRNN(nn.Module):
-    def __init__(self, vocab_size, embed_size, num_hiddens,
-                 num_layers, **kwargs):
+    def __init__(self, vocab_size, embed_size, num_hiddens, num_layers, **kwargs):
+        
         super(BiRNN, self).__init__(**kwargs)
-        self.embedding = nn.Embedding(vocab_size, embed_size)
+        self.embedding = nn.Embedding(vocab_size, embed_size) # 稍后用GloVe嵌入初始化
+        
         # 将bidirectional设置为True以获取双向循环神经网络
-        self.encoder = nn.LSTM(embed_size, num_hiddens, num_layers=num_layers,
-                                bidirectional=True)
-        self.decoder = nn.Linear(4 * num_hiddens, 2)
+        self.encoder = nn.LSTM(embed_size, num_hiddens, num_layers=num_layers, bidirectional=True)
+        self.decoder = nn.Linear(4 * num_hiddens, 2) # 2个输出类别：正面和负面情感
 
     def forward(self, inputs):
         # inputs的形状是（批量大小，时间步数）
         # 因为长短期记忆网络要求其输入的第一个维度是时间维，
         # 所以在获得词元表示之前，输入会被转置。
-        # 输出形状为（时间步数，批量大小，词向量维度）
-        embeddings = self.embedding(inputs.T)
-        self.encoder.flatten_parameters()
+
+        # 使用GloVe嵌入
+        embeddings = self.embedding(inputs.T) # 输出形状为（时间步数，批量大小，词向量维度）
+
+        # 【双向/多层】使得参数在GPU上连续存储，
+        self.encoder.flatten_parameters() 
+        
         # 返回上一个隐藏层在不同时间步的隐状态，
-        # outputs的形状是（时间步数，批量大小，2*隐藏单元数）
-        outputs, _ = self.encoder(embeddings)
-        # 连结初始和最终时间步的隐状态，作为全连接层的输入，
-        # 其形状为（批量大小，4*隐藏单元数）
-        encoding = torch.cat((outputs[0], outputs[-1]), dim=1)
+        outputs, _ = self.encoder(embeddings) # outputs的形状是（时间步数，批量大小，2*隐藏单元数），2=双向
+        
+        # 取出双向的初始和最终时间步的隐状态（反向和正向的最终隐状态）
+        encoding = torch.cat((outputs[0], outputs[-1]), dim=1) # 拼接形状为（批量大小，2*2*隐藏单元数）
+        
+        # 连结初始和最终时间步的隐状态，作为全连接层的输入
         outs = self.decoder(encoding)
         return outs
+        # outs的形状是（批量大小，2），2=正面和负面情感
     
 # =========================== 辅助函数 ===========================
 
@@ -219,7 +225,7 @@ def evaluate_accuracy_gpu(net, data_iter, device=None): #@save
 
 def predict_sentiment(net, vocab, sequence, device):
     """预测文本序列的情感"""
-    sequence = torch.tensor(vocab[sequence.split()], device=device)
+    sequence = torch.tensor(vocab[sequence.split()], device=device) # 将文本序列转换为索引
     label = torch.argmax(net(sequence.reshape(1, -1)), dim=1)
     return 'positive' if label == 1 else 'negative'
 
