@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import json
 import multiprocessing
 import re
+import time  # 添加时间模块用于性能监控
 
 ################################## BERT模型组件 ###################################################
 
@@ -497,33 +498,62 @@ if __name__ == "__main__":
     num_layers=2, dropout=0.1, max_len=512, devices=[device])
 
     # 加载SNLI数据集（用于BERT微调）
-    batch_size, max_len, num_workers = 512, 128, 1
+    # 优化批次大小和worker数量以提升训练速度
+    batch_size, max_len = 64, 128  # 减小批次大小，减少内存占用，提高训练稳定性
+    
+    # 根据平台和CPU核心数优化worker数量
+    if os.name == 'nt':  # Windows
+        num_workers = 0  # Windows上多进程可能有问题
+    else:
+        num_workers = min(8, multiprocessing.cpu_count())
+    
+    print(f"Using batch_size={batch_size}, num_workers={num_workers}")
+    
     data_dir = '../data/snli_1.0'
     train_set = SNLIBERTDataset(read_snli(data_dir, True), max_len, vocab)
     test_set = SNLIBERTDataset(read_snli(data_dir, False), max_len, vocab)
-    train_iter = torch.utils.data.DataLoader(train_set, batch_size, shuffle=True, num_workers=num_workers)
-    test_iter = torch.utils.data.DataLoader(test_set, batch_size, num_workers=num_workers)
+    
+    # 使用pin_memory和persistent_workers加速数据加载
+    train_iter = torch.utils.data.DataLoader(
+        train_set, batch_size, shuffle=True, num_workers=num_workers,
+        pin_memory=True if device.type == 'cuda' else False,
+        persistent_workers=True if num_workers > 0 else False
+    )
+    test_iter = torch.utils.data.DataLoader(
+        test_set, batch_size, num_workers=num_workers,
+        pin_memory=True if device.type == 'cuda' else False,
+        persistent_workers=True if num_workers > 0 else False
+    )
     
     # 定义下游任务分类器
     net = BERTClassifier(bert)
 
     # 设置训练参数
-    lr, num_epochs = 1e-4, 5
-    trainer = torch.optim.Adam(net.parameters(), lr=lr)
-    loss = nn.CrossEntropyLoss(reduction='none')
+    lr, num_epochs = 2e-5, 5  # 使用更合适的学习率
+    trainer = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=0.01)  # 使用AdamW优化器
+    loss = nn.CrossEntropyLoss()  # 简化损失函数，避免手动求和
+    
+    # 添加学习率调度器
+    scheduler = torch.optim.lr_scheduler.LinearLR(trainer, start_factor=1.0, end_factor=0.1, total_iters=num_epochs)
+    
+    # 使用混合精度训练加速
+    from torch.cuda.amp import autocast, GradScaler
+    scaler = GradScaler() if device.type == 'cuda' else None
 
     # ============================ 训练模型 ===========================
     
     # 检查是否有训练好的模型，如果有则不需要重新训练
     train_from_scratch = False
     try:
-        net.load_state_dict(torch.load('../models/15.7-natural-language-inference-bert.pth'))
+        net.load_state_dict(torch.load('../models/15.7-natural-language-inference-bert.pth', map_location=device))
         print("Loaded pre-trained model.")
-        net = net.to(device)
         # train_from_scratch = False
     except FileNotFoundError:
         print("No pre-trained model found, training from scratch.")
         train_from_scratch = True
+    
+    # 将模型移动到设备（只执行一次）
+    net = net.to(device)
 
     if train_from_scratch:
 
@@ -531,71 +561,185 @@ if __name__ == "__main__":
         record_train_acc = []
         record_test_acc = []
 
-        # 多GPU训练
-        # net = nn.DataParallel(net, device_ids=devices).to(devices[0]) if devices else net.to(device)
+        # 多GPU训练（如果可用）
+        if torch.cuda.device_count() > 1:
+            print(f"Using {torch.cuda.device_count()} GPUs for training")
+            net = nn.DataParallel(net)
 
+        print("Starting training...")
+        net.train()
+        
+        # 记录训练开始时间
+        training_start_time = time.time()
+        
         for epoch in range(num_epochs):
+            epoch_start_time = time.time()
+            epoch_loss = 0.0
+            epoch_correct = 0
+            epoch_total = 0
+            num_batches = 0
 
-            num_samples = 0
-            num_labels = 0
-
-            loss_train_sum = 0.0
-            acc_train_sum = 0.0
-
-            net = net.to(device)
-            net.train()
+            # 添加进度显示
+            print(f"Epoch {epoch + 1}/{num_epochs}")
+            
             for i, (X, y) in enumerate(train_iter):
-
-                # X, y = X.to(device), y.to(device) 在本例中，X是一个元组，包含前提和假设，必须逐个迁移gpu
+                # 数据传输到设备
                 if isinstance(X, list):
-                    # 微调BERT中所需
-                    X = [x.to(device) for x in X]
+                    X = [x.to(device, non_blocking=True) for x in X]
                 else:
-                    X = X.to(device)
-                y = y.to(device)
+                    X = X.to(device, non_blocking=True)
+                y = y.to(device, non_blocking=True)
 
-                y_hat = net(X)
-                l = loss(y_hat, y)
+                # 使用混合精度训练
+                if scaler:
+                    with autocast():
+                        y_hat = net(X)
+                        l = loss(y_hat, y)
+                else:
+                    y_hat = net(X)
+                    l = loss(y_hat, y)
 
                 trainer.zero_grad()
-                l.sum().backward()
-                trainer.step()
+                
+                if scaler:
+                    scaler.scale(l).backward()
+                    scaler.step(trainer)
+                    scaler.update()
+                else:
+                    l.backward()
+                    trainer.step()
 
-                loss_train_sum += l.sum().item()
-                # acc_train_sum += accuracy(y_hat, y)
-                acc_train_sum += (y_hat.argmax(dim=1) == y).sum().item()
+                # 统计
+                epoch_loss += l.item()
+                epoch_correct += (y_hat.argmax(dim=1) == y).sum().item()
+                epoch_total += y.size(0)
+                num_batches += 1
+                
+                # 每100个batch显示一次进度
+                if (i + 1) % 100 == 0:
+                    current_acc = epoch_correct / epoch_total
+                    current_loss = epoch_loss / num_batches
+                    print(f"  Batch {i+1}, Loss: {current_loss:.4f}, Acc: {current_acc:.4f}")
 
-                # num_samples += X.shape[0]
-                num_samples += y.shape[0]  # 在本例中，X是一个元组，包含前提和假设，所以我们使用y.shape[0]来计算样本数量
-                num_labels += y.numel()  # 计算所有元素的数量，适用于多标签分类任务
-
-            train_loss = loss_train_sum / num_samples
-            train_acc = acc_train_sum / num_labels  # 注意由于是多标签分类任务，这里用的是num_labels
-
+            # 计算epoch统计
+            epoch_time = time.time() - epoch_start_time
+            train_loss = epoch_loss / num_batches
+            train_acc = epoch_correct / epoch_total
+            
             record_train_loss.append(train_loss)
             record_train_acc.append(train_acc)
-            print(f"epoch {epoch + 1}, train loss {train_loss:.4f}, train acc {train_acc:.4f}")
+            
+            # 更新学习率
+            scheduler.step()
+            
+            print(f"Epoch {epoch + 1} completed in {epoch_time:.2f}s - Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
 
-            # 评估
-            net.eval()
-            # test_acc = eval_accuracy(net, test_iter, device) # 这个是不准确的
-            test_acc = evaluate_accuracy_gpu(net, test_iter, device)
-            record_test_acc.append(test_acc)
-            print(f"\t test acc {test_acc:.4f}")
-
-        # 绘制损失和准确率（画在同一张图上）
-        plt.figure(figsize=(10, 5))
-        plt.plot(range(1, num_epochs + 1), record_train_loss, label='Train Loss')
-        plt.plot(range(1, num_epochs + 1), record_train_acc, label='Train Acc')
-        plt.plot(range(1, num_epochs + 1), record_test_acc, label='Test Acc')
-        plt.xlabel('Epoch')
-        plt.ylabel('Value')
-        plt.title('Training Record')
-        plt.legend()
-        plt.grid()
-        plt.show()
+            # 每2个epoch评估一次测试集（减少评估频率）
+            if (epoch + 1) % 2 == 0 or epoch == num_epochs - 1:
+                net.eval()
+                test_acc = evaluate_accuracy_gpu(net, test_iter, device)
+                record_test_acc.append(test_acc)
+                print(f"  Test Acc: {test_acc:.4f}")
+                net.train()
+            else:
+                record_test_acc.append(record_test_acc[-1] if record_test_acc else 0.0)
+        
+        total_training_time = time.time() - training_start_time
+        print(f"\nTraining completed in {total_training_time:.2f} seconds ({total_training_time/60:.2f} minutes)")
 
         # 保存模型
-        torch.save(net.state_dict(), '../models/15.7-natural-language-inference-bert.pth')
+        print("Training completed. Saving model...")
+        # 如果使用了DataParallel，需要保存module的state_dict
+        model_to_save = net.module if hasattr(net, 'module') else net
+        torch.save(model_to_save.state_dict(), '../models/15.7-natural-language-inference-bert.pth')
+        print("Model saved successfully!")
 
-    # =========================== 预测 ===========================
+        # 绘制损失和准确率（画在同一张图上）
+        plt.figure(figsize=(12, 5))
+        
+        plt.subplot(1, 2, 1)
+        plt.plot(range(1, num_epochs + 1), record_train_loss, label='Train Loss', marker='o')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training Loss')
+        plt.legend()
+        plt.grid()
+        
+        plt.subplot(1, 2, 2)
+        plt.plot(range(1, num_epochs + 1), record_train_acc, label='Train Acc', marker='o')
+        plt.plot(range(1, num_epochs + 1), record_test_acc, label='Test Acc', marker='s')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.title('Training and Test Accuracy')
+        plt.legend()
+        plt.grid()
+        
+        plt.tight_layout()
+        plt.show()
+
+    # =========================== 预测和性能监控 ===========================
+    
+    print("\n" + "="*50)
+    print("Performance Summary:")
+    print("="*50)
+    
+    # 最终评估
+    print("Evaluating final model performance...")
+    start_time = time.time()
+    
+    net.eval()
+    final_test_acc = evaluate_accuracy_gpu(net, test_iter, device)
+    
+    eval_time = time.time() - start_time
+    print(f"Final Test Accuracy: {final_test_acc:.4f}")
+    print(f"Evaluation Time: {eval_time:.2f} seconds")
+    print(f"Model Parameters: {sum(p.numel() for p in net.parameters()):,}")
+    print(f"Trainable Parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad):,}")
+    
+    # 示例预测函数
+    def predict_snli(premise, hypothesis, net, vocab, max_len, device):
+        """
+        预测前提和假设之间的关系
+        """
+        net.eval()
+        premise_tokens = tokenize([premise.lower()])[0]
+        hypothesis_tokens = tokenize([hypothesis.lower()])[0]
+        
+        # 截断
+        while len(premise_tokens) + len(hypothesis_tokens) > max_len - 3:
+            if len(premise_tokens) > len(hypothesis_tokens):
+                premise_tokens.pop()
+            else:
+                hypothesis_tokens.pop()
+        
+        tokens, segments = get_tokens_and_segments(premise_tokens, hypothesis_tokens)
+        token_ids = vocab[tokens] + [vocab['<pad>']] * (max_len - len(tokens))
+        segments = segments + [0] * (max_len - len(segments))
+        valid_len = len(tokens)
+        
+        # 转换为tensor
+        tokens_tensor = torch.tensor([token_ids], dtype=torch.long).to(device)
+        segments_tensor = torch.tensor([segments], dtype=torch.long).to(device)
+        valid_lens_tensor = torch.tensor([valid_len]).to(device)
+        
+        with torch.no_grad():
+            outputs = net([tokens_tensor, segments_tensor, valid_lens_tensor])
+            prediction = outputs.argmax(dim=1).item()
+        
+        label_map = {0: 'entailment', 1: 'contradiction', 2: 'neutral'}
+        return label_map[prediction]
+    
+    # 示例预测
+    print("\n" + "="*30 + " 示例预测 " + "="*30)
+    examples = [
+        ("A person on a horse jumps over a broken down airplane.", "A person is training his horse for a competition."),
+        ("A person on a horse jumps over a broken down airplane.", "A person is at a diner, ordering an omelette."),
+        ("A person on a horse jumps over a broken down airplane.", "A person is outdoors, on a horse.")
+    ]
+    
+    for premise, hypothesis in examples:
+        prediction = predict_snli(premise, hypothesis, net, vocab, max_len, device)
+        print(f"前提: {premise}")
+        print(f"假设: {hypothesis}")
+        print(f"预测关系: {prediction}")
+        print("-" * 80)
