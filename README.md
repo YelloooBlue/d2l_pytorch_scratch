@@ -1,26 +1,35 @@
 # 《动手深度学习 2》PyTorch 最小化实现
-为了方便教学，各章节代码解耦，互不依赖。
+为了方便教学，各章节代码**解耦**，互不依赖。
 
-移除了作者 `d2l` 库的所有代码，减少混淆。
+移除原作者 `d2l` 库的所有代码，减少混淆。
 
-无Notebook，带中文注释`.py`文件，方便学生实操/移植。
+移除Notebook，带中文**注释**`.py`文件，方便学生实操/移植。
 
-支持 MacOS + Apple Silicon 芯片（即mps）运算加速。
+支持 MacOS + Apple Silicon 芯片（即mps）**运算加速**
 
-仅使用常见的外部库：
+**大部分章节仅使用CPU即可完成*
+
+
+# 环境
+
+> **💡提示**
+> 建议使用uv进行依赖管理，使用 `uv sync` 命令一键处理。
+
+Python 版本：`3.10`
+
+已最小化依赖，**仅使用常见库**：
 - Pytorch 核心
 - Matplotlib 绘图
 - Pandas 数据处理（仅在部分章节使用）
 - Pillow 图像处理（仅在部分章节使用）
 
 
-# 环境
-Python 版本：3.10，已最小化依赖。
+或手动安装以下依赖：
+- PyTorch：2.7.0
+- Matplotlib：3.7.2
+- Pandas：2.3.1
 
-使用uv进行依赖管理，使用`uv sync`命令同步环境，或手动安装以下依赖：
-- PyTorch 版本：2.7.0
-- Matplotlib 版本：3.7.2
-- Pandas 版本：2.3.1
+```pip install torch==2.7.0 matplotlib==3.7.2 pandas==2.3.1```
 
 # 数据集下载及结构说明
 ### 图像分类数据集 FashionMNIST（3.5章）
