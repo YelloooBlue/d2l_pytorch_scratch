@@ -163,13 +163,11 @@ if __name__ == "__main__":
     # =========================== 定义模型 ===========================
     
     # 导入预训练模型
-    pretrained_net = torchvision.models.resnet18(pretrained=False)
-    pretrained_net.load_state_dict(torch.load("../checkpoints/resnet18-f37072fd.pth"))
+    pretrained_net = torchvision.models.resnet18(pretrained=True)
     print(pretrained_net.fc)  # 查看最后一层
 
     # 定义微调模型
-    finetune_net = torchvision.models.resnet18(pretrained=False)
-    finetune_net.load_state_dict(torch.load("../checkpoints/resnet18-f37072fd.pth"))
+    finetune_net = torchvision.models.resnet18(pretrained=True)
     finetune_net.fc = nn.Linear(finetune_net.fc.in_features, 2)  # 修改最后一层为2个输出
     nn.init.xavier_uniform_(finetune_net.fc.weight)
 
@@ -195,8 +193,7 @@ if __name__ == "__main__":
 
     # ============================ 冻结卷积层 ===========================
 
-    frozen_net = torchvision.models.resnet18(pretrained=False)
-    frozen_net.load_state_dict(torch.load("../checkpoints/resnet18-f37072fd.pth"))
+    frozen_net = torchvision.models.resnet18(pretrained=True)
     for param in frozen_net.parameters():
         param.requires_grad = False
     frozen_net.fc = nn.Linear(frozen_net.fc.in_features, 2)  # 修改最后一层为2个输出
@@ -215,8 +212,7 @@ if __name__ == "__main__":
     print(f"Hotdog class weight shape: {hotdog_w.shape}")
 
     # 使用预训练模型的“Hotdog”类的fc层
-    hotdog_net = torchvision.models.resnet18(pretrained=False)
-    hotdog_net.load_state_dict(torch.load("../checkpoints/resnet18-f37072fd.pth"))
+    hotdog_net = torchvision.models.resnet18(pretrained=True)
     hotdog_net.fc = nn.Linear(hotdog_net.fc.in_features, 2)  # 修改最后一层为2个输出，形状应该是 2 x 512
     new_fc_weight = torch.zeros((2, hotdog_net.fc.in_features))  # 2 x 512
     new_fc_weight[0] = hotdog_w  # 将Hotdog类的权重赋值

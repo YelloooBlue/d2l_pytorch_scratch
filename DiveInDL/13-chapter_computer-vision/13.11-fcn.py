@@ -239,8 +239,7 @@ if __name__ == "__main__":
     # =========================== 预训练模型 ===========================
 
     # 导入预训练模型
-    pretrained_net = torchvision.models.resnet18(pretrained=False)
-    pretrained_net.load_state_dict(torch.load("../checkpoints/resnet18-f37072fd.pth"))
+    pretrained_net = torchvision.models.resnet18(pretrained=True)
     
     print(list(pretrained_net.children())[-3:])  # 查看最后三层
     """
