@@ -9,6 +9,10 @@
 
 **大部分章节仅使用CPU即可完成*
 
+>部分训练时间长的章节加入了模型参数(.pth)保存和加载机制，减少反复训练。
+通过`train_from_scratch`变量可以选择是否从头开始训练，权重保存在 `../models` 目录下。
+例如：10.4, 10.7, 13.11, 15.2, 15.3, 15.5, 15.7等章节。
+
 
 # 环境
 Python 版本：`3.10`
@@ -28,6 +32,13 @@ Python 版本：`3.10`
 > - Pandas：2.3.1
 > 
 > ```pip install torch==2.7.0 matplotlib==3.7.2 pandas==2.3.1```
+>
+
+**按需新建文件夹（在该仓库上一级目录）**
+- `../data`：存放数据集文件，详见下文
+- `../checkpoints`：存放预训练模型参数文件（网上下的）
+- `../models`：存放训练好的模型参数文件（本仓库训练的）
+
 
 # 数据集下载及结构说明
 ### 图像分类数据集 FashionMNIST（3.5章）
@@ -185,6 +196,16 @@ House Prices - Advanced Regression Techniques
 使用章节
 - 15.5章
 - 15.7章
+
+# 预训练模型
+
+### 预训练BERT模型（15.7章）
+下载以下数据集
+- https://d2l-data.s3-accelerate.amazonaws.com/bert.small.torch.zip
+
+并解压到`../checkpoints/bert.small.torch`目录下：
+- /vocab.json
+- /pretrained.params
 
 ## References
 - https://zh.d2l.ai/index.html
