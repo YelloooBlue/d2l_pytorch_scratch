@@ -1,15 +1,17 @@
-# 《动手深度学习 2》（王喆）PyTorch 最小化实现
+# 《动手深度学习 2》王喆 PyTorch 最小化实现
 为了方便教学，各章节代码解耦，互不依赖。
+
 移除了作者 `d2l` 库的所有代码，减少混淆。
-仅使用极少数的外部库：
-- Pytorch 核心
-- Matplotlib 绘图
-- Pandas 数据处理
-- *Pillow 图像处理（仅在部分章节使用）
 
 无Notebook，带中文注释`.py`文件，方便学生实操/移植。
 
 支持 MacOS + Apple Silicon 芯片（即mps）运算加速。
+
+仅使用常见的外部库：
+- Pytorch 核心
+- Matplotlib 绘图
+- Pandas 数据处理（仅在部分章节使用）
+- Pillow 图像处理（仅在部分章节使用）
 
 
 # 环境
@@ -176,3 +178,7 @@ House Prices - Advanced Regression Techniques
 使用章节
 - 15.5章
 - 15.7章
+
+## References
+- https://zh.d2l.ai/index.html
+- https://github.com/d2l-ai/d2l-zh
