@@ -1,5 +1,5 @@
 def main():
-    print("Hello from pytorchstudy!")
+    print("Hello from d2l_pytorch_scratch!")
 
     import torch
     if torch.backends.mps.is_available():
